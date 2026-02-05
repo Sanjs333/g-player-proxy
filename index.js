@@ -217,7 +217,7 @@ export async function init(router) {
               transform: (data) => {
                 if (data?.code === 200 && data?.data?.url) {
                   let lrcContent = "";
-                  if (data.data.lyric) {
+                  if (data.data.lyric && typeof data.data.lyric === "string") {
                     lrcContent = data.data.lyric;
                   } else if (
                     data.data.lrclist &&
@@ -225,10 +225,12 @@ export async function init(router) {
                   ) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
                   }
+
                   return {
                     data: {
                       url: data.data.url,
                       lrc: lrcContent,
+                      lrcId: data.data.lrc || data.data.lrcId || null,
                     },
                     _source: "openmusic-kw",
                   };
@@ -337,11 +339,13 @@ export async function init(router) {
                   let lrcContent = "";
                   if (data.data.lrclist && Array.isArray(data.data.lrclist)) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
-                  } else {
-                    lrcContent = data.data.lyric || data.data.lrc || "";
+                  } else if (data.data.lyric) {
+                    lrcContent = data.data.lyric;
+                  } else if (data.data.lrc) {
+                    lrcContent = data.data.lrc;
                   }
 
-                  if (lrcContent.trim() !== "") {
+                  if (lrcContent && lrcContent.trim() !== "") {
                     return {
                       data: { lrc: lrcContent },
                       _source: "openmusic-kw-lyr",
@@ -352,21 +356,25 @@ export async function init(router) {
               },
             },
             {
-              name: "openmusic-kuwo-song-fallback",
+              name: "openmusic-kuwo-song-lyric-fallback",
               url: `${API_CONFIG.OPEN_MUSIC_API_URL}?provider=kw&type=song&id=${id}&format=json&token=${API_CONFIG.OPEN_MUSIC_API_TOKEN}`,
               transform: (data) => {
                 if (data?.code === 200 && data?.data) {
                   let lrcContent = "";
-                  if (data.data.lrclist && Array.isArray(data.data.lrclist)) {
+
+                  if (data.data.lyric && typeof data.data.lyric === "string") {
+                    lrcContent = data.data.lyric;
+                  } else if (
+                    data.data.lrclist &&
+                    Array.isArray(data.data.lrclist)
+                  ) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
-                  } else {
-                    lrcContent = data.data.lyric || data.data.lrc || "";
                   }
 
                   if (lrcContent && lrcContent.trim() !== "") {
                     return {
                       data: { lrc: lrcContent },
-                      _source: "openmusic-kw-song",
+                      _source: "openmusic-kw-song-fallback",
                     };
                   }
                 }
