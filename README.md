@@ -57,6 +57,7 @@ cd SillyTavern && sed -i 's/enableServerPlugins: false/enableServerPlugins: true
 **第二步：下载插件**
 
 方式一：使用 Git（推荐）
+
 ```bash
 cd SillyTavern/plugins
 git clone https://github.com/Sanjs333/g-player-proxy.git
@@ -65,6 +66,7 @@ npm install
 ```
 
 方式二：手动下载
+
 1. 前往 [插件仓库](https://github.com/Sanjs333/g-player-proxy)
 2. 点击绿色的 `Code` 按钮 → `Download ZIP`
 3. 解压后将文件夹放入 `SillyTavern/plugins/` 目录
@@ -84,15 +86,19 @@ npm install
 
 ### ❓ 常见问题
 
-| 问题 | 解决方案 |
-|-----|---------|
-| 没有看到启动信息 | 检查 `config.yaml` 中 `enableServerPlugins` 是否为 `true` |
-| `git` 命令不存在 | 请先安装 Git：https://git-scm.com/downloads |
-| `npm` 命令不存在 | 请先安装 Node.js：https://nodejs.org/ |
-| 文件夹结构不对 | 确保路径为 `SillyTavern/plugins/g-player-proxy/index.js` |
-| macOS 的 sed 报错 | 使用 `sed -i '' 's/...'`（加空引号）或安装 gnu-sed |
-| 音乐无法播放 | 检查网络连接，部分音源可能需要代理 |
+| 问题              | 解决方案                                                  |
+| ----------------- | --------------------------------------------------------- |
+| 没有看到启动信息  | 检查 `config.yaml` 中 `enableServerPlugins` 是否为 `true` |
+| `git` 命令不存在  | 请先安装 Git：<https://git-scm.com/downloads>             |
+| `npm` 命令不存在  | 请先安装 Node.js：<https://nodejs.org/>                   |
+| 文件夹结构不对    | 确保路径为 `SillyTavern/plugins/g-player-proxy/index.js`  |
+| macOS 的 sed 报错 | 使用 `sed -i '' 's/...'`（加空引号）或安装 gnu-sed        |
+| 音乐无法播放      | 检查网络连接，部分音源可能需要代理                        |
 
+### 技术支持
+
+- 感谢落月API、 BugPk-Api、GD音乐台、OpenMusic等提供的技术支持
+  
 ### 🔗 相关链接
 
 - 主插件：[SillyTavern-TypingIndicatorThemes](https://github.com/Sanjs333/SillyTavern-TypingIndicatorThemes)
@@ -152,6 +158,7 @@ If the one-click command fails, follow these steps:
 **Step 2: Download the Plugin**
 
 Option A: Using Git (Recommended)
+
 ```bash
 cd SillyTavern/plugins
 git clone https://github.com/Sanjs333/g-player-proxy.git
@@ -160,6 +167,7 @@ npm install
 ```
 
 Option B: Manual Download
+
 1. Go to the [plugin repository](https://github.com/Sanjs333/g-player-proxy)
 2. Click the green `Code` button → `Download ZIP`
 3. Extract and place the folder in `SillyTavern/plugins/`
@@ -179,15 +187,19 @@ If you see the following message in the console, the installation was successful
 
 ### ❓ Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| No startup message | Check if `enableServerPlugins` is `true` in `config.yaml` |
-| `git` command not found | Install Git: https://git-scm.com/downloads |
-| `npm` command not found | Install Node.js: https://nodejs.org/ |
-| Wrong folder structure | Ensure path is `SillyTavern/plugins/g-player-proxy/index.js` |
-| sed error on macOS | Use `sed -i '' 's/...'` (with empty quotes) or install gnu-sed |
-| Music won't play | Check network connection; some sources may require proxy |
+| Issue                   | Solution                                                       |
+| ----------------------- | -------------------------------------------------------------- |
+| No startup message      | Check if `enableServerPlugins` is `true` in `config.yaml`      |
+| `git` command not found | Install Git: <https://git-scm.com/downloads>                   |
+| `npm` command not found | Install Node.js: <https://nodejs.org/>                         |
+| Wrong folder structure  | Ensure path is `SillyTavern/plugins/g-player-proxy/index.js`   |
+| sed error on macOS      | Use `sed -i '' 's/...'` (with empty quotes) or install gnu-sed |
+| Music won't play        | Check network connection; some sources may require proxy       |
 
+### Technical Support
+
+- Thanks to the technical support provided by LuoYue API, BugPk-Api, GD Music Station, OpenMusic, etc.
+  
 ### 🔗 Related Links
 
 - Main Plugin: [SillyTavern-TypingIndicatorThemes](https://github.com/Sanjs333/SillyTavern-TypingIndicatorThemes)

@@ -11,13 +11,12 @@ const API_CONFIG = {
   VKEYS_TENCENT_SEARCH: "https://api.vkeys.cn/v2/music/tencent?word=",
   VKEYS_TENCENT_SONG: "https://api.vkeys.cn/v2/music/tencent?id=",
   VKEYS_TENCENT_LYRIC: "https://api.vkeys.cn/v2/music/tencent/lyric?id=",
-  VKEYS_NETEASE_LYRIC: "https://api.vkeys.cn/v2/music/netease/lyric?id=",
-  VKEYS_KUWO_LYRIC: "https://api.vkeys.cn/v2/music/kuwo/lyric?id=",
   BUGPK_NETEASE_SONG: "https://api.bugpk.com/api/163_music",
   BUGPK_AGGREGATE: "https://api.bugpk.com/api/music",
   OPEN_MUSIC_API_URL: "https://open-music-server.pages.dev/api/music",
   OPEN_MUSIC_API_TOKEN:
     "ark-6VY6nBX2QgL3HEu9yFR5-zhrFHMLfhr-9LVk2Y5ecAH3ALAMHnrObY-KMXIMqN_WMniBlkluIPsyVfu22rhRZyRjQXng4ecBrzrwaurGKrHdVXJGOlt5RxnOnho1BFTQ",
+  GD_STUDIO_API: "https://music-api.gdstudio.xyz/api.php",
 };
 
 function getAudioMimeType(url) {
@@ -37,7 +36,6 @@ function convertLrclistToLrc(lrclist) {
   if (!lrclist) return "";
   if (typeof lrclist === "string") return lrclist;
   if (!Array.isArray(lrclist)) return "";
-
   return lrclist
     .map((item) => {
       const time = parseFloat(item.time) || 0;
@@ -60,17 +58,14 @@ async function tryMultipleAPIs(apis) {
         },
         timeout: 15000,
       });
-
       const transformed = api.transform
         ? api.transform(response.data)
         : response.data;
       if (transformed === null) continue;
       if (api.validate && !api.validate(transformed)) continue;
-
       const hasData =
         transformed?.data &&
         (Array.isArray(transformed.data) ? transformed.data.length > 0 : true);
-
       if (hasData) return transformed;
     } catch (error) {}
   }
@@ -82,13 +77,10 @@ export async function init(router) {
     try {
       const query = req.query.query;
       const source = req.query.source || "tencent";
-
       if (!query) {
         return res.status(400).json({ error: "Missing query parameter" });
       }
-
       let result = null;
-
       switch (source) {
         case "netease":
           result = await tryMultipleAPIs([
@@ -97,9 +89,31 @@ export async function init(router) {
               url: `${API_CONFIG.VKEYS_NETEASE_SEARCH}${encodeURIComponent(query)}`,
               transform: (data) => data,
             },
+            {
+              name: "gdstudio-netease-search",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=search&source=netease&name=${encodeURIComponent(query)}&count=30&pages=1`,
+              transform: (data) => {
+                if (Array.isArray(data) && data.length > 0) {
+                  return {
+                    data: data.map((item) => ({
+                      id: item.id,
+                      song: item.name,
+                      singer: Array.isArray(item.artist)
+                        ? item.artist.join(", ")
+                        : item.artist,
+                      cover: item.pic_id
+                        ? `${API_CONFIG.GD_STUDIO_API}?types=pic&source=netease&id=${item.pic_id}&size=500`
+                        : "",
+                      pic_id: item.pic_id || "",
+                      lyric_id: item.lyric_id || item.id,
+                    })),
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
-
         case "kuwo":
           result = await tryMultipleAPIs([
             {
@@ -122,9 +136,41 @@ export async function init(router) {
                 return null;
               },
             },
+            {
+              name: "gdstudio-kuwo-search",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=search&source=kuwo&name=${encodeURIComponent(query)}&count=30&pages=1`,
+              transform: (data) => {
+                if (Array.isArray(data) && data.length > 0) {
+                  return {
+                    data: data.map((item) => {
+                      let coverUrl = "";
+                      if (item.pic_id) {
+                        if (item.pic_id.startsWith("http")) {
+                          coverUrl = item.pic_id;
+                        } else if (item.pic_id.includes("/")) {
+                          coverUrl = `https://img2.kuwo.cn/star/albumcover/500/${item.pic_id.replace(/^120\//, "")}`;
+                        } else {
+                          coverUrl = `${API_CONFIG.GD_STUDIO_API}?types=pic&source=kuwo&id=${item.pic_id}&size=500`;
+                        }
+                      }
+                      return {
+                        id: item.id,
+                        song: (item.name || "").trim(),
+                        singer: Array.isArray(item.artist)
+                          ? item.artist.map((a) => a.trim()).join(", ")
+                          : (item.artist || "").trim(),
+                        cover: coverUrl,
+                        pic_id: item.pic_id || "",
+                        lyric_id: item.lyric_id || item.id,
+                      };
+                    }),
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
-
         case "tencent":
         default:
           result = await tryMultipleAPIs([
@@ -138,10 +184,32 @@ export async function init(router) {
               url: `${API_CONFIG.BUGPK_AGGREGATE}?media=tencent&type=search&word=${encodeURIComponent(query)}`,
               transform: (data) => data,
             },
+            {
+              name: "gdstudio-tencent-search",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=search&source=tencent&name=${encodeURIComponent(query)}&count=30&pages=1`,
+              transform: (data) => {
+                if (Array.isArray(data) && data.length > 0) {
+                  return {
+                    data: data.map((item) => ({
+                      id: item.id,
+                      song: item.name,
+                      singer: Array.isArray(item.artist)
+                        ? item.artist.join(", ")
+                        : item.artist,
+                      cover: item.pic_id
+                        ? `${API_CONFIG.GD_STUDIO_API}?types=pic&source=tencent&id=${item.pic_id}&size=500`
+                        : "",
+                      pic_id: item.pic_id || "",
+                      lyric_id: item.lyric_id || item.id,
+                    })),
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
       }
-
       if (result) {
         res.json(result);
       } else {
@@ -162,13 +230,10 @@ export async function init(router) {
     try {
       const id = req.query.id;
       const source = req.query.source || "tencent";
-
       if (!id) {
         return res.status(400).json({ error: "Missing id parameter" });
       }
-
       let result = null;
-
       switch (source) {
         case "netease":
           result = await tryMultipleAPIs([
@@ -176,7 +241,11 @@ export async function init(router) {
               name: "bugpk-netease-song",
               url: `${API_CONFIG.BUGPK_NETEASE_SONG}?ids=${id}&level=standard&type=json`,
               transform: (data) => {
-                if (data?.url && data?.status === 200) {
+                if (
+                  data?.url &&
+                  data?.status === 200 &&
+                  data.url.startsWith("http")
+                ) {
                   return {
                     data: [
                       {
@@ -197,7 +266,7 @@ export async function init(router) {
               name: "bugpk-aggregate-netease",
               url: `${API_CONFIG.BUGPK_AGGREGATE}?media=netease&type=song&id=${id}`,
               transform: (data) => {
-                if (data?.url) {
+                if (data?.url && data.url.startsWith("http")) {
                   return {
                     data: [{ url: data.url, lyric: data.lrc }],
                     _source: "bugpk-aggregate",
@@ -206,9 +275,26 @@ export async function init(router) {
                 return null;
               },
             },
+            {
+              name: "gdstudio-netease-song",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=url&source=netease&id=${id}&br=320`,
+              transform: (data) => {
+                if (
+                  data?.url &&
+                  data.url.startsWith("http") &&
+                  !data.url.includes("版权") &&
+                  !data.url.includes("不存在")
+                ) {
+                  return {
+                    data: [{ url: data.url }],
+                    _source: "gdstudio-netease",
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
-
         case "kuwo":
           result = await tryMultipleAPIs([
             {
@@ -225,7 +311,6 @@ export async function init(router) {
                   ) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
                   }
-
                   return {
                     data: {
                       url: data.data.url,
@@ -238,36 +323,107 @@ export async function init(router) {
                 return null;
               },
             },
-          ]);
-          break;
-
-        case "tencent":
-        default:
-          result = await tryMultipleAPIs([
             {
-              name: "vkeys-tencent-song",
-              url: `${API_CONFIG.VKEYS_TENCENT_SONG}${id}`,
-              transform: (data) => data,
-              validate: (data) => {
-                const url = data?.data?.url;
-                if (url && url.includes(".mp4")) return false;
-                return !!url;
-              },
-            },
-            {
-              name: "bugpk-tencent-song",
-              url: `${API_CONFIG.BUGPK_AGGREGATE}?media=tencent&type=song&id=${id}`,
+              name: "gdstudio-kuwo-song",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=url&source=kuwo&id=${id}&br=320`,
               transform: (data) => {
-                if (data?.url && !data.url.includes(".mp4")) {
+                if (
+                  data?.url &&
+                  data.url.startsWith("http") &&
+                  !data.url.includes("版权") &&
+                  !data.url.includes("不存在")
+                ) {
                   return {
-                    data: { url: data.url, lrc: data.lrc },
-                    _source: "bugpk-tencent",
+                    data: { url: data.url },
+                    _source: "gdstudio-kuwo",
                   };
                 }
                 return null;
               },
             },
           ]);
+          break;
+        case "tencent":
+        default:
+          const qualityLevels = [10, 8, 4];
+
+          for (const quality of qualityLevels) {
+            try {
+              const response = await axios.get(
+                `${API_CONFIG.VKEYS_TENCENT_SONG}${id}&quality=${quality}`,
+                {
+                  headers: {
+                    "User-Agent":
+                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                  },
+                  timeout: 15000,
+                },
+              );
+
+              const data = response.data;
+              const url = data?.data?.url;
+              if (url && !url.includes(".mp4")) {
+                result = {
+                  ...data,
+                  _source: `vkeys-tencent-q${quality}`,
+                };
+                break;
+              }
+
+              console.debug(
+                `[vkeys] quality=${quality} 返回 mp4 或空，尝试降级...`,
+              );
+            } catch (error) {
+              console.debug(
+                `[vkeys] quality=${quality} 请求失败:`,
+                error.message,
+              );
+            }
+          }
+
+          if (!result) {
+            result = await tryMultipleAPIs([
+              {
+                name: "bugpk-tencent-song",
+                url: `${API_CONFIG.BUGPK_AGGREGATE}?media=tencent&type=song&id=${id}`,
+                transform: (data) => {
+                  if (
+                    data?.url &&
+                    data.url.startsWith("http") &&
+                    !data.url.includes(".mp4")
+                  ) {
+                    return {
+                      data: {
+                        url: data.url,
+                        lrc: data.lrc,
+                      },
+                      _source: "bugpk-tencent",
+                    };
+                  }
+                  return null;
+                },
+              },
+              {
+                name: "gdstudio-tencent-song",
+                url: `${API_CONFIG.GD_STUDIO_API}?types=url&source=tencent&id=${id}&br=320`,
+                transform: (data) => {
+                  if (
+                    data?.url &&
+                    data.url.startsWith("http") &&
+                    !data.url.includes(".mp4") &&
+                    !data.url.includes("版权") &&
+                    !data.url.includes("不存在")
+                  ) {
+                    return {
+                      data: { url: data.url },
+                      _source: "gdstudio-tencent",
+                    };
+                  }
+                  return null;
+                },
+              },
+            ]);
+          }
 
           if (!result) {
             return res.json({
@@ -277,7 +433,6 @@ export async function init(router) {
           }
           break;
       }
-
       if (result) {
         res.json(result);
       } else {
@@ -297,13 +452,10 @@ export async function init(router) {
       const source = req.query.source || "tencent";
       const title = req.query.title || "";
       const artist = req.query.artist || "";
-
       if (!id) {
         return res.status(400).json({ error: "Missing id parameter" });
       }
-
       let result = null;
-
       switch (source) {
         case "netease":
           result = await tryMultipleAPIs([
@@ -326,9 +478,23 @@ export async function init(router) {
                 return null;
               },
             },
+            {
+              name: "gdstudio-netease-lyric",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=lyric&source=netease&id=${id}`,
+              transform: (data) => {
+                if (data?.lyric && data.lyric.trim() !== "") {
+                  return {
+                    data: {
+                      lrc: data.lyric,
+                      tlyric: data.tlyric || "",
+                    },
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
-
         case "kuwo":
           result = await tryMultipleAPIs([
             {
@@ -344,7 +510,6 @@ export async function init(router) {
                   } else if (data.data.lrc) {
                     lrcContent = data.data.lrc;
                   }
-
                   if (lrcContent && lrcContent.trim() !== "") {
                     return {
                       data: { lrc: lrcContent },
@@ -361,7 +526,6 @@ export async function init(router) {
               transform: (data) => {
                 if (data?.code === 200 && data?.data) {
                   let lrcContent = "";
-
                   if (data.data.lyric && typeof data.data.lyric === "string") {
                     lrcContent = data.data.lyric;
                   } else if (
@@ -370,7 +534,6 @@ export async function init(router) {
                   ) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
                   }
-
                   if (lrcContent && lrcContent.trim() !== "") {
                     return {
                       data: { lrc: lrcContent },
@@ -381,9 +544,24 @@ export async function init(router) {
                 return null;
               },
             },
+            {
+              name: "gdstudio-kuwo-lyric",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=lyric&source=kuwo&id=${id}`,
+              transform: (data) => {
+                if (data?.lyric && data.lyric.trim() !== "") {
+                  return {
+                    data: {
+                      lrc: data.lyric,
+                      tlyric: data.tlyric || "",
+                    },
+                    _source: "gdstudio-kuwo",
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
-
         case "tencent":
         default:
           result = await tryMultipleAPIs([
@@ -416,69 +594,50 @@ export async function init(router) {
                 return null;
               },
             },
+            {
+              name: "gdstudio-tencent-lyric",
+              url: `${API_CONFIG.GD_STUDIO_API}?types=lyric&source=tencent&id=${id}`,
+              transform: (data) => {
+                if (data?.lyric && data.lyric.trim() !== "") {
+                  return {
+                    data: {
+                      lrc: data.lyric,
+                      tlyric: data.tlyric || "",
+                    },
+                    _source: "gdstudio-tencent",
+                  };
+                }
+                return null;
+              },
+            },
           ]);
           break;
       }
-
       if (!result && title) {
         const query = artist ? `${title} ${artist}` : title;
-
         try {
           const searchRes = await axios.get(
-            `${API_CONFIG.OPEN_MUSIC_API_URL}?provider=kw&name=${encodeURIComponent(query)}&page=1&limit=1&token=${API_CONFIG.OPEN_MUSIC_API_TOKEN}`,
-            {
-              headers: { token: API_CONFIG.OPEN_MUSIC_API_TOKEN },
-              timeout: 10000,
-            },
+            `${API_CONFIG.GD_STUDIO_API}?types=search&source=kuwo&name=${encodeURIComponent(query)}&count=1&pages=1`,
+            { timeout: 10000 },
           );
-
-          if (searchRes.data?.code === 200 && searchRes.data?.data) {
-            const list = Array.isArray(searchRes.data.data)
-              ? searchRes.data.data
-              : [searchRes.data.data];
-
-            if (list.length > 0 && (list[0].rid || list[0].id)) {
-              const songId = list[0].rid || list[0].id;
-
-              const lyrRes = await axios.get(
-                `${API_CONFIG.OPEN_MUSIC_API_URL}?provider=kw&id=${songId}&type=lyr&format=all&token=${API_CONFIG.OPEN_MUSIC_API_TOKEN}`,
-                {
-                  headers: {
-                    token: API_CONFIG.OPEN_MUSIC_API_TOKEN,
-                  },
-                  timeout: 10000,
+          if (Array.isArray(searchRes.data) && searchRes.data.length > 0) {
+            const songId = searchRes.data[0].id;
+            const lyrRes = await axios.get(
+              `${API_CONFIG.GD_STUDIO_API}?types=lyric&source=kuwo&id=${songId}`,
+              { timeout: 10000 },
+            );
+            if (lyrRes.data?.lyric && lyrRes.data.lyric.trim() !== "") {
+              result = {
+                data: {
+                  lrc: lyrRes.data.lyric,
+                  tlyric: lyrRes.data.tlyric || "",
                 },
-              );
-
-              if (lyrRes.data?.code === 200 && lyrRes.data?.data) {
-                let lrcContent = "";
-                if (
-                  lyrRes.data.data.lrclist &&
-                  Array.isArray(lyrRes.data.data.lrclist)
-                ) {
-                  lrcContent = convertLrclistToLrc(lyrRes.data.data.lrclist);
-                } else {
-                  lrcContent =
-                    lyrRes.data.data.lyric || lyrRes.data.data.lrc || "";
-                }
-
-                if (lrcContent && lrcContent.trim() !== "") {
-                  result = {
-                    data: { lrc: lrcContent },
-                    _source: "openmusic-kw-by-name",
-                  };
-                }
-              }
+                _source: "gdstudio-kw-by-name",
+              };
             }
           }
-        } catch (fallbackErr) {
-          console.error(
-            "[G-Player Proxy] 歌词 fallback 失败:",
-            fallbackErr.message,
-          );
-        }
+        } catch (fallbackErr) {}
       }
-
       if (result) {
         res.json(result);
       } else {
@@ -495,7 +654,6 @@ export async function init(router) {
       if (!musicUrl || !musicUrl.startsWith("http")) {
         return res.status(400).send("Invalid url parameter");
       }
-
       let referer = "https://www.google.com/";
       if (musicUrl.includes("qqmusic.qq.com")) {
         referer = "https://y.qq.com/";
@@ -504,17 +662,14 @@ export async function init(router) {
       } else if (musicUrl.includes("kuwo.cn")) {
         referer = "https://www.kuwo.cn/";
       }
-
       const requestHeaders = {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         Referer: referer,
       };
-
       if (req.headers.range) {
         requestHeaders.Range = req.headers.range;
       }
-
       const response = await axios({
         method: "get",
         url: musicUrl,
@@ -524,16 +679,13 @@ export async function init(router) {
         validateStatus: (status) =>
           (status >= 200 && status < 300) || status === 206,
       });
-
       const upstreamContentType = response.headers["content-type"];
       let finalContentType;
-
       if (upstreamContentType && upstreamContentType.startsWith("audio/")) {
         finalContentType = upstreamContentType;
       } else {
         finalContentType = getAudioMimeType(musicUrl);
       }
-
       res.setHeader("Content-Type", finalContentType);
       if (response.headers["content-length"]) {
         res.setHeader("Content-Length", response.headers["content-length"]);
@@ -542,11 +694,9 @@ export async function init(router) {
         res.setHeader("Content-Range", response.headers["content-range"]);
       }
       res.setHeader("Accept-Ranges", "bytes");
-
       if (req.headers.range && response.status === 206) {
         res.status(206);
       }
-
       response.data.pipe(res);
     } catch (error) {
       res.status(502).send("Stream failed");
