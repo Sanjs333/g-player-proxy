@@ -28,6 +28,56 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PLAYLIST_FILE = path.join(__dirname, "playlists.json");
 
+const ApiHealth = {
+  state: new Map(),
+  customRules: new Map(),
+  defaultRule: { threshold: 5, duration: 10 * 60 * 1000, label: "10 分钟" },
+  setRule(name, rule) {
+    this.customRules.set(name, rule);
+  },
+  getRule(name) {
+    return this.customRules.get(name) || this.defaultRule;
+  },
+  isBlocked(name) {
+    const s = this.state.get(name);
+    if (!s) return false;
+    if (s.blockUntil && Date.now() < s.blockUntil) return true;
+    if (s.blockUntil && Date.now() >= s.blockUntil) {
+      s.failCount = 0;
+      s.blockUntil = 0;
+    }
+    return false;
+  },
+  recordSuccess(name) {
+    const s = this.state.get(name);
+    if (s && s.failCount > 0) {
+      s.failCount = 0;
+      s.blockUntil = 0;
+    }
+  },
+  recordFailure(name) {
+    let s = this.state.get(name);
+    if (!s) {
+      s = { failCount: 0, blockUntil: 0 };
+      this.state.set(name, s);
+    }
+    s.failCount++;
+    const rule = this.getRule(name);
+    if (s.failCount >= rule.threshold && !s.blockUntil) {
+      s.blockUntil = Date.now() + rule.duration;
+      console.warn(
+        `[ApiHealth] ⛔ ${name} 连续失败 ${s.failCount} 次，熔断 ${rule.label}`,
+      );
+    }
+  },
+};
+
+ApiHealth.setRule("vkeys-tencent-link", {
+  threshold: 2,
+  duration: 3 * 24 * 60 * 60 * 1000,
+  label: "3 天",
+});
+
 function loadPlaylists() {
   try {
     if (!fs.existsSync(PLAYLIST_FILE)) {
@@ -83,7 +133,6 @@ async function resolvePlaylistUrl(input) {
     /c\.y\.qq\.com|c6\.y\.qq\.com|fcgi-bin\/u|163cn\.tv/i.test(url);
 
   if (isShortLink) {
-    console.log("[Playlists] 检测到短链，尝试解析:", url);
     try {
       const resp = await axios.get(url, {
         maxRedirects: 5,
@@ -95,7 +144,6 @@ async function resolvePlaylistUrl(input) {
         validateStatus: (s) => s >= 200 && s < 400,
       });
       const finalUrl = resp.request?.res?.responseUrl;
-      console.log("[Playlists] 短链跳转后的最终URL:", finalUrl || "(未能获取)");
       if (finalUrl) {
         url = finalUrl;
       } else if (typeof resp.data === "string") {
@@ -104,7 +152,6 @@ async function resolvePlaylistUrl(input) {
           resp.data.match(/dissid[^0-9]*(\d{6,})/i) ||
           resp.data.match(/"id"\s*:\s*"?(\d{8,})"?/);
         if (htmlId) {
-          console.log("[Playlists] 从HTML内容中提取到歌单ID:", htmlId[1]);
           return { server: "tencent", id: htmlId[1] };
         }
       }
@@ -112,8 +159,6 @@ async function resolvePlaylistUrl(input) {
       console.warn("[Playlists] 短链解析失败:", e.message);
     }
   }
-
-  console.log("[Playlists] 最终用于正则匹配的URL:", url);
 
   let match = url.match(/music\.163\.com[^\s]*?[?&#\/]id=(\d+)/i);
   if (match) return { server: "netease", id: match[1] };
@@ -184,10 +229,6 @@ async function fetchNeteasePlaylistFull(id) {
         .filter(Boolean);
     }
 
-    console.log(
-      `[Playlists] 网易云歌单共 ${trackIds.length} 首歌，开始分批获取详情...`,
-    );
-
     const BATCH_SIZE = 400;
     const allSongs = [];
     const totalBatches = Math.ceil(trackIds.length / BATCH_SIZE);
@@ -217,16 +258,15 @@ async function fetchNeteasePlaylistFull(id) {
             cover: s.al?.picUrl || "",
           });
         });
-
-        console.log(
-          `[Playlists] 批次 ${Math.floor(i / BATCH_SIZE) + 1}/${totalBatches} 完成，累计 ${allSongs.length} 首`,
-        );
       } catch (e) {
         console.warn(
-          `[Playlists] 批次 ${Math.floor(i / BATCH_SIZE) + 1} 获取失败:`,
+          `[Playlists] 批次 ${Math.floor(i / BATCH_SIZE) + 1}/${totalBatches} 获取失败:`,
           e.message,
         );
       }
+    }
+
+    if (allSongs.length > 0) {
     }
 
     return allSongs.length > 0 ? allSongs : null;
@@ -240,10 +280,8 @@ async function importPlaylistFromApi(server, id) {
   if (server === "netease") {
     const songs = await fetchNeteasePlaylistFull(id);
     if (songs && songs.length > 0) {
-      console.log(`[Playlists] ✓ 网易云直连API导入 ${songs.length} 首歌`);
       return songs;
     }
-    console.log("[Playlists] 网易云直连失败，降级使用 meting API");
   }
 
   const apis = [
@@ -283,7 +321,6 @@ async function importPlaylistFromApi(server, id) {
         .filter(Boolean);
 
       if (songs.length > 0) {
-        console.log(`[Playlists] ✓ 从 ${url} 导入 ${songs.length} 首歌`);
         return songs;
       }
     } catch (e) {
@@ -324,6 +361,9 @@ function convertLrclistToLrc(lrclist) {
 
 async function tryMultipleAPIs(apis) {
   for (const api of apis) {
+    if (ApiHealth.isBlocked(api.name)) {
+      continue;
+    }
     try {
       const response = await axios.get(api.url, {
         headers: {
@@ -336,13 +376,30 @@ async function tryMultipleAPIs(apis) {
       const transformed = api.transform
         ? api.transform(response.data)
         : response.data;
-      if (transformed === null) continue;
-      if (api.validate && !api.validate(transformed)) continue;
+      if (transformed === null) {
+        ApiHealth.recordFailure(api.name);
+        continue;
+      }
+      if (api.validate && !api.validate(transformed)) {
+        ApiHealth.recordFailure(api.name);
+        continue;
+      }
       const hasData =
         transformed?.data &&
         (Array.isArray(transformed.data) ? transformed.data.length > 0 : true);
-      if (hasData) return transformed;
-    } catch (error) {}
+      if (hasData) {
+        ApiHealth.recordSuccess(api.name);
+        return transformed;
+      }
+      ApiHealth.recordFailure(api.name);
+    } catch (error) {
+      ApiHealth.recordFailure(api.name);
+      const status = error.response?.status;
+      const code = error.code;
+      console.warn(
+        `[API] ${api.name} 失败 status=${status || "无"} code=${code || "无"} msg=${error.message}`,
+      );
+    }
   }
   return null;
 }
@@ -383,10 +440,44 @@ export async function init(router) {
                         : "",
                       pic_id: item.pic_id || "",
                       lyric_id: item.lyric_id || item.id,
+                      album: item.album || "",
+                      time: item.time || "",
                     })),
                   };
                 }
                 return null;
+              },
+            },
+            {
+              name: "qijieya-netease-search",
+              url: `${API_CONFIG.QIJIEYA_API}?server=netease&type=search&id=${encodeURIComponent(query)}&page=${page}&limit=30`,
+              transform: (data) => {
+                if (Array.isArray(data) && data.length > 0) {
+                  return {
+                    data: data.map((item) => {
+                      const artistRaw = item.artist;
+                      const artist = Array.isArray(artistRaw)
+                        ? artistRaw.join(", ")
+                        : artistRaw || "";
+                      const urlStr = item.url || "";
+                      const idMatch = urlStr.match(/[?&]id=([^&]+)/);
+                      const extractedId = idMatch ? idMatch[1] : "";
+                      return {
+                        id: String(item.id || item.url_id || extractedId || ""),
+                        song: item.name || item.title || "",
+                        singer: artist,
+                        cover: item.pic || item.cover || "",
+                        lyric_id: item.lyric_id || item.id || "",
+                        album: item.album || "",
+                        time: item.time || "",
+                      };
+                    }),
+                  };
+                }
+                return null;
+              },
+              validate: (transformed) => {
+                return !!transformed?.data?.[0]?.id;
               },
             },
           ]);
@@ -407,6 +498,9 @@ export async function init(router) {
                       song: item.name,
                       singer: item.artist,
                       cover: item.pic,
+                      album: item.album || item.albumName || "",
+                      time:
+                        item.releaseDate || item.publishTime || item.time || "",
                     })),
                   };
                 }
@@ -439,6 +533,8 @@ export async function init(router) {
                         cover: coverUrl,
                         pic_id: item.pic_id || "",
                         lyric_id: item.lyric_id || item.id,
+                        album: item.album || "",
+                        time: item.time || "",
                       };
                     }),
                   };
@@ -466,13 +562,47 @@ export async function init(router) {
                     })),
                   };
                 }
-                return data;
+                return null;
+              },
+              validate: (transformed) => {
+                return !!transformed?.data?.[0]?.id;
               },
             },
             {
-              name: "bugpk-tencent-search",
-              url: `${API_CONFIG.BUGPK_AGGREGATE}?media=tencent&type=search&word=${encodeURIComponent(query)}`,
-              transform: (data) => (page > 1 ? null : data),
+              name: "qijieya-tencent-search",
+              url: `${API_CONFIG.QIJIEYA_API}?server=tencent&type=search&id=${encodeURIComponent(query)}&page=${page}&limit=30`,
+              transform: (data) => {
+                if (Array.isArray(data) && data.length > 0) {
+                  return {
+                    data: data.map((item) => {
+                      const artistRaw = item.artist;
+                      const artist = Array.isArray(artistRaw)
+                        ? artistRaw.join(", ")
+                        : artistRaw || "";
+                      const urlStr = item.url || "";
+                      const idMatch = urlStr.match(/[?&]id=([^&]+)/);
+                      const extractedId = idMatch ? idMatch[1] : "";
+                      return {
+                        id: String(
+                          item.id ||
+                            item.url_id ||
+                            item.mid ||
+                            extractedId ||
+                            "",
+                        ),
+                        song: item.name || item.title || "",
+                        singer: artist,
+                        cover: item.pic || item.cover || "",
+                        _mid: item.id || item.mid || extractedId || "",
+                      };
+                    }),
+                  };
+                }
+                return null;
+              },
+              validate: (transformed) => {
+                return !!transformed?.data?.[0]?.id;
+              },
             },
           ]);
           break;
@@ -594,13 +724,20 @@ export async function init(router) {
               transform: (data) => {
                 if (data?.code === 200 && data?.data?.url) {
                   let lrcContent = "";
-                  if (data.data.lyric && typeof data.data.lyric === "string") {
-                    lrcContent = data.data.lyric;
-                  } else if (
-                    data.data.lrclist &&
-                    Array.isArray(data.data.lrclist)
+                  if (
+                    typeof data.data.lrclist === "string" &&
+                    data.data.lrclist.trim() !== ""
                   ) {
+                    lrcContent = data.data.lrclist;
+                  } else if (Array.isArray(data.data.defaultLrc)) {
+                    lrcContent = convertLrclistToLrc(data.data.defaultLrc);
+                  } else if (Array.isArray(data.data.lrclist)) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
+                  } else if (
+                    data.data.lyric &&
+                    typeof data.data.lyric === "string"
+                  ) {
+                    lrcContent = data.data.lyric;
                   }
                   return {
                     data: {
@@ -636,12 +773,36 @@ export async function init(router) {
           break;
         case "tencent":
         default:
-          const qualityLevels = [10, 6, 4];
-          const isNumericId = /^\d+$/.test(String(id));
-          const paramName = isNumericId ? "id" : "mid";
-
-          for (const quality of qualityLevels) {
-            try {
+          result = await tryMultipleAPIs([
+            {
+              name: "qijieya-tencent-song",
+              url: `${API_CONFIG.QIJIEYA_API}?server=tencent&type=song&id=${id}`,
+              transform: (data) => {
+                if (
+                  Array.isArray(data) &&
+                  data.length > 0 &&
+                  data[0].url &&
+                  typeof data[0].url === "string" &&
+                  data[0].url.startsWith("http") &&
+                  !data[0].url.includes(".mp4")
+                ) {
+                  return {
+                    data: {
+                      url: data[0].url,
+                      lrc: "",
+                    },
+                    _source: "qijieya-tencent",
+                  };
+                }
+                return null;
+              },
+            },
+          ]);
+          if (!result) {
+            const qualityLevels = [4];
+            const isNumericId = /^\d+$/.test(String(id));
+            const paramName = isNumericId ? "id" : "mid";
+            const tryQuality = async (quality) => {
               const requestUrl = `${API_CONFIG.VKEYS_TENCENT_SONG}?${paramName}=${id}&quality=${quality}`;
               const response = await axios.get(requestUrl, {
                 headers: {
@@ -650,7 +811,6 @@ export async function init(router) {
                 },
                 timeout: 5000,
               });
-
               const data = response.data;
               const url = data?.data?.url;
               const kbps = data?.data?.kbps;
@@ -675,46 +835,21 @@ export async function init(router) {
                 hasRealPath &&
                 isValidKbps
               ) {
-                result = {
-                  data: {
-                    url: url,
-                    lrc: "",
-                  },
+                return {
+                  data: { url: url, lrc: "" },
                   _source: `vkeys-tencent-q${quality}`,
                   _quality: data.data.quality || `q${quality}`,
                   _kbps: data.data.kbps || "",
                 };
-                break;
               }
-            } catch (error) {}
-          }
+              throw new Error(`q${quality} invalid`);
+            };
 
-          if (!result) {
-            result = await tryMultipleAPIs([
-              {
-                name: "qijieya-tencent-song",
-                url: `${API_CONFIG.QIJIEYA_API}?server=tencent&type=song&id=${id}`,
-                transform: (data) => {
-                  if (
-                    Array.isArray(data) &&
-                    data.length > 0 &&
-                    data[0].url &&
-                    typeof data[0].url === "string" &&
-                    data[0].url.startsWith("http") &&
-                    !data[0].url.includes(".mp4")
-                  ) {
-                    return {
-                      data: {
-                        url: data[0].url,
-                        lrc: "",
-                      },
-                      _source: "qijieya-tencent",
-                    };
-                  }
-                  return null;
-                },
-              },
-            ]);
+            try {
+              result = await Promise.any(
+                qualityLevels.map((q) => tryQuality(q)),
+              );
+            } catch (e) {}
           }
 
           if (!result) {
@@ -824,7 +959,14 @@ export async function init(router) {
               transform: (data) => {
                 if (data?.code === 200 && data?.data) {
                   let lrcContent = "";
-                  if (data.data.lrclist && Array.isArray(data.data.lrclist)) {
+                  if (
+                    typeof data.data.lrclist === "string" &&
+                    data.data.lrclist.trim() !== ""
+                  ) {
+                    lrcContent = data.data.lrclist;
+                  } else if (Array.isArray(data.data.defaultLrc)) {
+                    lrcContent = convertLrclistToLrc(data.data.defaultLrc);
+                  } else if (Array.isArray(data.data.lrclist)) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
                   } else if (data.data.lyric) {
                     lrcContent = data.data.lyric;
@@ -847,13 +989,20 @@ export async function init(router) {
               transform: (data) => {
                 if (data?.code === 200 && data?.data) {
                   let lrcContent = "";
-                  if (data.data.lyric && typeof data.data.lyric === "string") {
-                    lrcContent = data.data.lyric;
-                  } else if (
-                    data.data.lrclist &&
-                    Array.isArray(data.data.lrclist)
+                  if (
+                    typeof data.data.lrclist === "string" &&
+                    data.data.lrclist.trim() !== ""
                   ) {
+                    lrcContent = data.data.lrclist;
+                  } else if (Array.isArray(data.data.defaultLrc)) {
+                    lrcContent = convertLrclistToLrc(data.data.defaultLrc);
+                  } else if (Array.isArray(data.data.lrclist)) {
                     lrcContent = convertLrclistToLrc(data.data.lrclist);
+                  } else if (
+                    data.data.lyric &&
+                    typeof data.data.lyric === "string"
+                  ) {
+                    lrcContent = data.data.lyric;
                   }
                   if (lrcContent && lrcContent.trim() !== "") {
                     return {
@@ -935,6 +1084,150 @@ export async function init(router) {
               },
             },
           ]);
+
+          let needCrossSource = !result;
+          if (!needCrossSource && result && !result.data.tlyric && title) {
+            const lrcText = result.data.lrc || "";
+            const cleanText = lrcText
+              .replace(/\[[\d:.]+\]/g, "")
+              .replace(/\[[a-z]+:[^\]]*\]/gi, "")
+              .trim();
+            const chineseCount = (cleanText.match(/[\u4e00-\u9fa5]/g) || [])
+              .length;
+            const letterCount = (cleanText.match(/[a-zA-Z]/g) || []).length;
+            const japaneseCount = (
+              cleanText.match(/[\u3040-\u309f\u30a0-\u30ff]/g) || []
+            ).length;
+            const koreanCount = (cleanText.match(/[\uac00-\ud7af]/g) || [])
+              .length;
+            if (
+              letterCount > chineseCount * 2 ||
+              japaneseCount > 5 ||
+              koreanCount > 5
+            ) {
+              needCrossSource = true;
+            }
+          }
+
+          if (needCrossSource && title) {
+            try {
+              const query = artist ? `${title} ${artist}` : title;
+              let kwRid = null;
+              for (let page = 1; page <= 3 && !kwRid; page++) {
+                const searchResp = await axios.get(
+                  `${API_CONFIG.OPEN_MUSIC_API_URL}?provider=kw&name=${encodeURIComponent(query)}&page=${page}&limit=10&token=${API_CONFIG.OPEN_MUSIC_API_TOKEN}`,
+                  {
+                    timeout: 8000,
+                    headers: {
+                      token: API_CONFIG.OPEN_MUSIC_API_TOKEN,
+                    },
+                  },
+                );
+                if (searchResp.data?.code === 200 && searchResp.data?.data) {
+                  const list = Array.isArray(searchResp.data.data)
+                    ? searchResp.data.data
+                    : searchResp.data.data.list || [];
+                  if (list.length === 0) break;
+                  const lowerTitle = title.toLowerCase().trim();
+                  const lowerArtist = (artist || "").toLowerCase().trim();
+                  const matched = list.find((item) => {
+                    const iTitle = (item.name || "").toLowerCase().trim();
+                    const iArtistRaw = item.artist;
+                    const iArtist = Array.isArray(iArtistRaw)
+                      ? iArtistRaw
+                          .map((a) =>
+                            typeof a === "string" ? a : a.name || "",
+                          )
+                          .join(",")
+                          .toLowerCase()
+                      : (iArtistRaw || "").toLowerCase();
+                    const titleHit =
+                      iTitle === lowerTitle ||
+                      iTitle.includes(lowerTitle) ||
+                      lowerTitle.includes(iTitle);
+                    const artistHit =
+                      !lowerArtist ||
+                      iArtist.includes(lowerArtist) ||
+                      lowerArtist
+                        .split(/[\/&,]/)
+                        .some((a) => iArtist.includes(a.trim()));
+                    return titleHit && artistHit;
+                  });
+                  if (matched) kwRid = matched.rid || matched.id;
+                  if (list.length < 10) break;
+                } else break;
+              }
+
+              if (kwRid) {
+                const lyrResp = await axios.get(
+                  `${API_CONFIG.OPEN_MUSIC_API_URL}?provider=kw&id=${kwRid}&type=lyr&format=all&token=${API_CONFIG.OPEN_MUSIC_API_TOKEN}`,
+                  {
+                    timeout: 8000,
+                    headers: {
+                      token: API_CONFIG.OPEN_MUSIC_API_TOKEN,
+                    },
+                  },
+                );
+                if (lyrResp.data?.code === 200 && lyrResp.data?.data) {
+                  let kwLrc = "";
+                  const kwData = lyrResp.data.data;
+                  if (kwData.lrclist && typeof kwData.lrclist === "string") {
+                    kwLrc = kwData.lrclist;
+                  } else if (
+                    kwData.defaultLrc &&
+                    Array.isArray(kwData.defaultLrc)
+                  ) {
+                    kwLrc = convertLrclistToLrc(kwData.defaultLrc);
+                  } else if (kwData.lyric) {
+                    kwLrc = kwData.lyric;
+                  }
+                  if (kwLrc && kwLrc.trim() !== "") {
+                    result = {
+                      data: {
+                        lrc: kwLrc,
+                        tlyric: "",
+                        trans: "",
+                      },
+                      _source: "kuwo-cross-source",
+                    };
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn("[API] kuwo 跨源补歌词失败:", e.message);
+            }
+          }
+
+          if (!result) {
+            try {
+              const qResp = await axios.get(
+                `${API_CONFIG.QIJIEYA_API}?server=tencent&type=lyric&id=${id}`,
+                {
+                  timeout: 8000,
+                  responseType: "text",
+                  transformResponse: [(d) => d],
+                  headers: {
+                    "User-Agent":
+                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                  },
+                },
+              );
+              if (
+                typeof qResp.data === "string" &&
+                qResp.data.includes("[") &&
+                qResp.data.trim().length > 10
+              ) {
+                result = {
+                  data: {
+                    lrc: qResp.data,
+                    tlyric: "",
+                    trans: "",
+                  },
+                  _source: "qijieya-tencent-lyric",
+                };
+              }
+            } catch (e) {}
+          }
           break;
       }
       if (!result && title) {

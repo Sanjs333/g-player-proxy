@@ -1,6 +1,6 @@
 {
   "name": "g-player-proxy",
-  "version": "4.0",
+  "version": "4.1",
   "description": "为SillyTavern前端音乐播放器提供一个通用的CORS代理。",
   "main": "index.js",
   "type": "module",
