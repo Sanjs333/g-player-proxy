@@ -11,10 +11,6 @@ export const info = {
 };
 
 const API_CONFIG = {
-  VKEYS_NETEASE_SEARCH: "https://api.vkeys.cn/v2/music/netease?word=",
-  VKEYS_TENCENT_SEARCH: "https://api.vkeys.cn/v2/music/tencent?word=",
-  VKEYS_TENCENT_SONG: "https://api.vkeys.cn/music/tencent/song/link",
-  VKEYS_TENCENT_LYRIC: "https://api.vkeys.cn/v2/music/tencent/lyric?id=",
   BUGPK_NETEASE_SONG: "https://api.bugpk.com/api/163_music",
   BUGPK_AGGREGATE: "https://api.bugpk.com/api/music",
   OPEN_MUSIC_API_URL: "https://open-music-server.pages.dev/api/music",
@@ -71,12 +67,6 @@ const ApiHealth = {
     }
   },
 };
-
-ApiHealth.setRule("vkeys-tencent-link", {
-  threshold: 2,
-  duration: 3 * 24 * 60 * 60 * 1000,
-  label: "3 天",
-});
 
 function loadPlaylists() {
   try {
@@ -419,11 +409,6 @@ export async function init(router) {
         case "netease":
           result = await tryMultipleAPIs([
             {
-              name: "vkeys-netease-search",
-              url: `${API_CONFIG.VKEYS_NETEASE_SEARCH}${encodeURIComponent(query)}&page=${page}&num=30`,
-              transform: (data) => data,
-            },
-            {
               name: "gdstudio-netease-search",
               url: `${API_CONFIG.GD_STUDIO_API}?types=search&source=netease&name=${encodeURIComponent(query)}&count=30&pages=${page}`,
               transform: (data) => {
@@ -436,7 +421,7 @@ export async function init(router) {
                         ? item.artist.join(", ")
                         : item.artist,
                       cover: item.pic_id
-                        ? `${API_CONFIG.GD_STUDIO_API}?types=pic&source=netease&id=${item.pic_id}&size=500`
+                        ? `/api/plugins/g-player-proxy/cover-proxy?provider=gdstudio&source=netease&id=${item.pic_id}&size=500`
                         : "",
                       pic_id: item.pic_id || "",
                       lyric_id: item.lyric_id || item.id,
@@ -462,11 +447,21 @@ export async function init(router) {
                       const urlStr = item.url || "";
                       const idMatch = urlStr.match(/[?&]id=([^&]+)/);
                       const extractedId = idMatch ? idMatch[1] : "";
+                      const songIdStr = String(
+                        item.id || item.url_id || extractedId || "",
+                      );
+                      const rawPic = item.pic || item.cover || "";
+                      const picIdMatch = rawPic.match(/[?&]id=([^&]+)/);
+                      const coverProxyId = picIdMatch
+                        ? picIdMatch[1]
+                        : songIdStr;
                       return {
-                        id: String(item.id || item.url_id || extractedId || ""),
+                        id: songIdStr,
                         song: item.name || item.title || "",
                         singer: artist,
-                        cover: item.pic || item.cover || "",
+                        cover: coverProxyId
+                          ? `/api/plugins/g-player-proxy/cover-proxy?provider=qijieya&source=netease&id=${encodeURIComponent(coverProxyId)}`
+                          : "",
                         lyric_id: item.lyric_id || item.id || "",
                         album: item.album || "",
                         time: item.time || "",
@@ -521,7 +516,9 @@ export async function init(router) {
                         } else if (item.pic_id.includes("/")) {
                           coverUrl = `https://img2.kuwo.cn/star/albumcover/500/${item.pic_id.replace(/^120\//, "")}`;
                         } else {
-                          coverUrl = `${API_CONFIG.GD_STUDIO_API}?types=pic&source=kuwo&id=${item.pic_id}&size=500`;
+                          coverUrl = item.pic_id
+                            ? `/api/plugins/g-player-proxy/cover-proxy?provider=gdstudio&source=kuwo&id=${item.pic_id}&size=500`
+                            : "";
                         }
                       }
                       return {
@@ -548,27 +545,6 @@ export async function init(router) {
         default:
           result = await tryMultipleAPIs([
             {
-              name: "vkeys-tencent-search",
-              url: `${API_CONFIG.VKEYS_TENCENT_SEARCH}${encodeURIComponent(query)}&page=${page}&num=30`,
-              transform: (data) => {
-                if (data?.data && Array.isArray(data.data)) {
-                  return {
-                    ...data,
-                    data: data.data.map((item) => ({
-                      ...item,
-                      id: item.mid || item.songmid || item.id,
-                      _originalId: item.id,
-                      _mid: item.mid || item.songmid || "",
-                    })),
-                  };
-                }
-                return null;
-              },
-              validate: (transformed) => {
-                return !!transformed?.data?.[0]?.id;
-              },
-            },
-            {
               name: "qijieya-tencent-search",
               url: `${API_CONFIG.QIJIEYA_API}?server=tencent&type=search&id=${encodeURIComponent(query)}&page=${page}&limit=30`,
               transform: (data) => {
@@ -582,17 +558,21 @@ export async function init(router) {
                       const urlStr = item.url || "";
                       const idMatch = urlStr.match(/[?&]id=([^&]+)/);
                       const extractedId = idMatch ? idMatch[1] : "";
+                      const songIdStr = String(
+                        item.id || item.url_id || item.mid || extractedId || "",
+                      );
+                      const rawPic = item.pic || item.cover || "";
+                      const picIdMatch = rawPic.match(/[?&]id=([^&]+)/);
+                      const coverProxyId = picIdMatch
+                        ? picIdMatch[1]
+                        : songIdStr;
                       return {
-                        id: String(
-                          item.id ||
-                            item.url_id ||
-                            item.mid ||
-                            extractedId ||
-                            "",
-                        ),
+                        id: songIdStr,
                         song: item.name || item.title || "",
                         singer: artist,
-                        cover: item.pic || item.cover || "",
+                        cover: coverProxyId
+                          ? `/api/plugins/g-player-proxy/cover-proxy?provider=qijieya&source=tencent&id=${encodeURIComponent(coverProxyId)}`
+                          : "",
                         _mid: item.id || item.mid || extractedId || "",
                       };
                     }),
@@ -798,59 +778,6 @@ export async function init(router) {
               },
             },
           ]);
-          if (!result) {
-            const qualityLevels = [4];
-            const isNumericId = /^\d+$/.test(String(id));
-            const paramName = isNumericId ? "id" : "mid";
-            const tryQuality = async (quality) => {
-              const requestUrl = `${API_CONFIG.VKEYS_TENCENT_SONG}?${paramName}=${id}&quality=${quality}`;
-              const response = await axios.get(requestUrl, {
-                headers: {
-                  "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                },
-                timeout: 5000,
-              });
-              const data = response.data;
-              const url = data?.data?.url;
-              const kbps = data?.data?.kbps;
-              const isSuccess = data?.code === 200 || data?.code === 0;
-              const urlPath = url ? url.replace(/^https?:\/\/[^/]+/, "") : "";
-              const hasRealPath =
-                urlPath.length > 1 &&
-                (urlPath.includes(".") ||
-                  urlPath.includes("vkey=") ||
-                  urlPath.includes("?"));
-              const isValidKbps =
-                kbps &&
-                String(kbps) !== "0kbps" &&
-                String(kbps) !== "0" &&
-                kbps !== 0;
-
-              if (
-                isSuccess &&
-                url &&
-                url.startsWith("http") &&
-                !url.includes(".mp4") &&
-                hasRealPath &&
-                isValidKbps
-              ) {
-                return {
-                  data: { url: url, lrc: "" },
-                  _source: `vkeys-tencent-q${quality}`,
-                  _quality: data.data.quality || `q${quality}`,
-                  _kbps: data.data.kbps || "",
-                };
-              }
-              throw new Error(`q${quality} invalid`);
-            };
-
-            try {
-              result = await Promise.any(
-                qualityLevels.map((q) => tryQuality(q)),
-              );
-            } catch (e) {}
-          }
 
           if (!result) {
             return res.json({
@@ -887,7 +814,7 @@ export async function init(router) {
         case "netease":
           try {
             const qResp = await axios.get(
-              `${API_CONFIG.QIJIEYA_API}?server=netease&type=lyric&id=${id}`,
+              `${API_CONFIG.QIJIEYA_API}?server=netease&type=lrc&id=${id}`,
               {
                 timeout: 8000,
                 responseType: "text",
@@ -1034,57 +961,6 @@ export async function init(router) {
           break;
         case "tencent":
         default:
-          let lyricId = id;
-          const isNumericLyricId = /^\d+$/.test(String(id));
-
-          if (!isNumericLyricId && title) {
-            try {
-              const query = artist ? `${title} ${artist}` : title;
-              const searchRes = await axios.get(
-                `${API_CONFIG.VKEYS_TENCENT_SEARCH}${encodeURIComponent(query)}`,
-                {
-                  headers: {
-                    "User-Agent":
-                      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                  },
-                  timeout: 10000,
-                },
-              );
-
-              if (searchRes.data?.data && Array.isArray(searchRes.data.data)) {
-                const matched = searchRes.data.data.find(
-                  (item) => item.mid === id || item.songmid === id,
-                );
-                if (matched && matched.id) {
-                  lyricId = matched.id;
-                } else if (searchRes.data.data[0]?.id) {
-                  lyricId = searchRes.data.data[0].id;
-                }
-              }
-            } catch (e) {
-              console.debug(`[lyric] mid 反查失败，继续用原 id`);
-            }
-          }
-
-          result = await tryMultipleAPIs([
-            {
-              name: "vkeys-tencent-lyric",
-              url: `${API_CONFIG.VKEYS_TENCENT_LYRIC}${lyricId}`,
-              transform: (data) => {
-                if (data?.data?.lrc && data.data.lrc.trim() !== "") {
-                  return {
-                    data: {
-                      lrc: data.data.lrc || "",
-                      tlyric: data.data.trans || "",
-                      trans: data.data.trans || "",
-                    },
-                  };
-                }
-                return null;
-              },
-            },
-          ]);
-
           let needCrossSource = !result;
           if (!needCrossSource && result && !result.data.tlyric && title) {
             const lrcText = result.data.lrc || "";
@@ -1201,7 +1077,7 @@ export async function init(router) {
           if (!result) {
             try {
               const qResp = await axios.get(
-                `${API_CONFIG.QIJIEYA_API}?server=tencent&type=lyric&id=${id}`,
+                `${API_CONFIG.QIJIEYA_API}?server=tencent&type=lrc&id=${id}`,
                 {
                   timeout: 8000,
                   responseType: "text",
@@ -1358,6 +1234,128 @@ export async function init(router) {
     } catch (error) {
       console.error("[Font Proxy] Failed:", error.message);
       res.status(502).send("Font proxy failed");
+    }
+  });
+  router.get("/cover-proxy", async (req, res) => {
+    try {
+      const provider = req.query.provider;
+      const source = req.query.source;
+      const id = req.query.id;
+      const size = req.query.size || "500";
+
+      if (!provider || !id) {
+        return res.status(400).send("Missing required params");
+      }
+
+      let realUrl = null;
+
+      const directUrl = req.query.url;
+      if (directUrl && /^https?:\/\//i.test(directUrl)) {
+        realUrl = directUrl;
+      } else if (provider === "gdstudio") {
+        if (!source) return res.status(400).send("Missing source");
+        const apiUrl = `${API_CONFIG.GD_STUDIO_API}?types=pic&source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}&size=${encodeURIComponent(size)}`;
+        try {
+          const resp = await axios.get(apiUrl, {
+            timeout: 10000,
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+          });
+          if (
+            resp.data?.url &&
+            typeof resp.data.url === "string" &&
+            resp.data.url.startsWith("http")
+          ) {
+            realUrl = resp.data.url;
+          }
+        } catch (e) {
+          console.warn("[Cover Proxy] gdstudio 解析失败:", e.message);
+        }
+      } else if (provider === "qijieya") {
+        if (!source) return res.status(400).send("Missing source");
+        if (source === "netease" || source === "tencent") {
+          realUrl = `${API_CONFIG.QIJIEYA_API}?server=${encodeURIComponent(source)}&type=pic&id=${encodeURIComponent(id)}`;
+        } else {
+          const apiUrl = `${API_CONFIG.GD_STUDIO_API}?types=pic&source=${encodeURIComponent(source)}&id=${encodeURIComponent(id)}&size=${encodeURIComponent(size)}`;
+          try {
+            const resp = await axios.get(apiUrl, {
+              timeout: 10000,
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              },
+            });
+            if (
+              resp.data?.url &&
+              typeof resp.data.url === "string" &&
+              resp.data.url.startsWith("http")
+            ) {
+              realUrl = resp.data.url;
+            }
+          } catch (e) {
+            console.warn("[Cover Proxy] gdstudio 降级解析失败:", e.message);
+          }
+        }
+      }
+
+      if (!realUrl) {
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(404).send("Cover not found");
+      }
+
+      let referer = "";
+      if (realUrl.includes("music.126.net")) {
+        referer = "https://music.163.com/";
+      } else if (
+        realUrl.includes("qqmusic.qq.com") ||
+        realUrl.includes("y.gtimg.cn") ||
+        realUrl.includes("y.qq.com")
+      ) {
+        referer = "https://y.qq.com/";
+      } else if (realUrl.includes("kuwo")) {
+        referer = "https://www.kuwo.cn/";
+      }
+
+      const imgHeaders = {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      };
+      if (referer) imgHeaders.Referer = referer;
+
+      try {
+        const imgResp = await axios({
+          method: "get",
+          url: realUrl,
+          responseType: "stream",
+          timeout: 15000,
+          maxRedirects: 5,
+          headers: imgHeaders,
+          validateStatus: (s) => s >= 200 && s < 300,
+        });
+
+        const upstreamType = imgResp.headers["content-type"] || "";
+        if (!upstreamType.startsWith("image/")) {
+          res.setHeader("Cache-Control", "no-store");
+          return res.status(404).send("Not an image");
+        }
+
+        res.setHeader("Content-Type", upstreamType);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        if (imgResp.headers["content-length"]) {
+          res.setHeader("Content-Length", imgResp.headers["content-length"]);
+        }
+        imgResp.data.pipe(res);
+      } catch (e) {
+        console.warn("[Cover Proxy] 拉取图片失败:", e.message);
+        res.setHeader("Cache-Control", "no-store");
+        return res.status(404).send("Cover fetch failed");
+      }
+    } catch (error) {
+      console.error("[Cover Proxy] Failed:", error.message);
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(404).send("Cover proxy failed");
     }
   });
   router.get("/playlists", (req, res) => {
