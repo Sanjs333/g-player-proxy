@@ -1,0 +1,28 @@
+# 不上传：依赖，由 npm install 生成
+node_modules/
+package-lock.json
+
+# 不上传：你本机的个人数据
+# playlists.json 是你自己导入的歌单，缺失时后端自动返回空列表并在首次保存时重建
+playlists.json
+
+# 不上传：本地备份
+.patch_backups/
+
+# 不上传：系统与日志垃圾
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 仅开发与线路维护使用
+tests/
+MUSIC_CORE.md
+NEXT_SESSION.md
+发布清单.md
+source-policy-manager.js
+source-policy-manager.html
+音源线路管理.bat
+source-policy.json.bak
+source-policy.json.tmp
+.vscode/

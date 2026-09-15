@@ -12,6 +12,19 @@ G-Player Proxy 是一个 SillyTavern 服务端插件，为 G-Player 音乐播放
 
 > ⚠️ **重要提示**：本插件是 [SillyTavern-TypingIndicatorThemes](https://github.com/Sanjs333/SillyTavern-TypingIndicatorThemes) 的**必需后端组件**，必须配合主插件使用，单独安装无法工作。
 
+### 4.6.0 更新说明
+
+请将本后端与前端扩展一起更新。已经安装过后端的用户，在 SillyTavern/plugins/g-player-proxy 目录中运行：
+
+```text
+git pull
+npm install
+```
+
+完成后完全退出并重新启动 SillyTavern；只刷新网页不会重新加载后端。
+
+本版包含播放器需要的多线路恢复、音源诊断、酷我备用线路和本地歌单接口。酷我 token 在前端扩展“工具”页由每位用户自行填写。个人歌单保存在本机 playlists.json，不随发行包提供；全新安装返回空歌单，首次保存时自动建立文件。source-policy.json 是随版本发布的默认线路启停配置，不是个人数据。
+
 ### 🚀 安装
 
 #### 前置要求
@@ -112,6 +125,19 @@ npm install
 G-Player Proxy is a SillyTavern server plugin that provides multi-source music proxy support for the G-Player music player.
 
 > ⚠️ **Important**: This plugin is a **required backend component** for [SillyTavern-TypingIndicatorThemes](https://github.com/Sanjs333/SillyTavern-TypingIndicatorThemes). It must be used together with the main plugin and will not work standalone.
+
+### Updating to 4.6.0
+
+Update this backend together with the frontend extension. For an existing installation, run the following inside SillyTavern/plugins/g-player-proxy:
+
+```text
+git pull
+npm install
+```
+
+Then fully exit and restart SillyTavern. Reloading the web page alone does not reload the backend.
+
+This release includes provider recovery, source diagnostics, a Kuwo backup source and local playlist APIs. Each user supplies their own Kuwo token in the frontend Tools tab. Personal playlists are stored locally in playlists.json, which is not distributed; a new installation starts empty and creates the file on its first save. source-policy.json contains the shipped default source policy, not personal data.
 
 ### 🚀 Installation
 

@@ -1,0 +1,11 @@
+{
+  "disabled": [
+    "gdstudio-kuwo-song",
+    "gdstudio-joox-song",
+    "vkeys-tencent-song",
+    "openmusic-kuwo-search",
+    "openmusic-kuwo-song",
+    "openmusic-kuwo-lyr",
+    "openmusic-kuwo-song-lyric-fallback"
+  ]
+}
